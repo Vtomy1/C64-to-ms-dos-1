@@ -1,0 +1,6 @@
+{
+  "name": "C64 to MS-DOS EXE 320x200 Converter",
+  "description": "Convert Commodore 64 ROMs into native MS-DOS MZ Executables for 8-bit VGA 320x200 Mode 13h, preserving original VIC-II palette cycles and PC gameport joystick support.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
