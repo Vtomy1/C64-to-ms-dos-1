@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
   Upload,
   Download,
@@ -12,11 +12,13 @@ import {
   Layers,
   Sparkles,
   RefreshCw,
-  FolderOpen
+  FolderOpen,
+  AlertTriangle,
+  X
 } from 'lucide-react';
 import { C64RomData, PaletteCycleConfig, JoystickConfig, ConversionOptions } from './types';
 import { SAMPLE_ROMS } from './utils/c64Samples';
-import { parseC64Binary } from './utils/c64Parser';
+import { parseC64Binary, validateC64Signature } from './utils/c64Parser';
 import { buildMsDosExe, GeneratedExeResult } from './utils/mzExeBuilder';
 import { CrtDisplay } from './components/CrtDisplay';
 import { MzHeaderInspector } from './components/MzHeaderInspector';
@@ -28,6 +30,16 @@ import { ExportModal } from './components/ExportModal';
 export default function App() {
   // Active ROM
   const [selectedRom, setSelectedRom] = useState<C64RomData>(SAMPLE_ROMS[0]);
+
+  // UI Error Toast state for invalid file uploads or signatures
+  const [toastError, setToastError] = useState<string | null>(null);
+
+  // Auto-dismiss toast error after 6 seconds
+  useEffect(() => {
+    if (!toastError) return;
+    const timer = setTimeout(() => setToastError(null), 6000);
+    return () => clearTimeout(timer);
+  }, [toastError]);
 
   // Active navigation tab
   const [activeTab, setActiveTab] = useState<'monitor' | 'mz_header' | 'palette' | 'joystick' | 'code'>('monitor');
@@ -96,7 +108,7 @@ export default function App() {
     }
   };
 
-  // Handle Custom File Upload (.prg, .crt, .d64, .bin)
+  // Handle Custom File Upload with C64 signature verification ($41 $30 $30, PRG load address, CRT/D64/T64 headers)
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -106,6 +118,22 @@ export default function App() {
       const buffer = event.target?.result as ArrayBuffer;
       if (buffer) {
         const bytes = new Uint8Array(buffer);
+
+        // Verification check of C64 file signature
+        const validation = validateC64Signature(bytes, file.name);
+        if (!validation.isValid) {
+          setToastError(
+            validation.errorMessage ||
+            `Invalid C64 file signature in "${file.name}". Expected valid PRG load address header (e.g., $0801, $1000, $C000) or Commodore container header ($41 $30 $30).`
+          );
+          if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+          }
+          return;
+        }
+
+        // File signature is valid: clear any prior error and parse binary
+        setToastError(null);
         const parsed = parseC64Binary(bytes, file.name);
         setSelectedRom(parsed);
         if (parsed.detectedCycleType) {
@@ -113,6 +141,11 @@ export default function App() {
             ...prev,
             type: parsed.detectedCycleType!
           }));
+        }
+
+        // Reset input value so same file can be uploaded again if modified
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
         }
       }
     };
@@ -352,6 +385,48 @@ export default function App() {
           </button>
         </div>
       </footer>
+
+      {/* Floating UI Error Toast Notification */}
+      {toastError && (
+        <div
+          role="alert"
+          aria-live="assertive"
+          className="fixed bottom-6 right-6 z-50 max-w-md w-full bg-[#180e14] border-2 border-red-600/80 rounded-xl p-4 shadow-[0_10px_35px_rgba(239,68,68,0.25)] animate-in fade-in slide-in-from-bottom-5 duration-200"
+        >
+          <div className="flex items-start gap-3">
+            <div className="p-2 rounded-lg bg-red-950/60 border border-red-800/80 text-red-400 shrink-0 mt-0.5">
+              <AlertTriangle className="w-5 h-5" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <h4 className="font-semibold text-sm text-red-200 flex items-center justify-between">
+                <span>C64 File Signature Error</span>
+                <span className="font-mono text-[10px] text-red-400/80 bg-red-950/50 px-1.5 py-0.5 rounded border border-red-900">
+                  REJECTED
+                </span>
+              </h4>
+              <p className="text-xs text-red-300/90 mt-1 leading-relaxed break-words">
+                {toastError}
+              </p>
+              <div className="mt-2.5 pt-2 border-t border-red-900/40 flex items-center justify-between text-[11px] text-red-400/70">
+                <span>Valid: $41 $30 $30 (P00/A00), .PRG ($0200-$FFFF), .CRT</span>
+                <button
+                  onClick={() => setToastError(null)}
+                  className="font-medium text-red-300 hover:text-white underline transition-colors"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+            <button
+              onClick={() => setToastError(null)}
+              className="p-1 rounded text-red-400/70 hover:text-red-200 hover:bg-red-950 transition-colors shrink-0"
+              title="Close Notification"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Export Modal */}
       <ExportModal

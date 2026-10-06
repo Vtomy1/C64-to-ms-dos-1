@@ -42,6 +42,127 @@ const OPCODES_6502: Record<number, { mnemonic: string; bytes: number; mode: stri
   0xF0: { mnemonic: 'BEQ', bytes: 2, mode: 'relative' }
 };
 
+export interface ValidationResult {
+  isValid: boolean;
+  errorMessage?: string;
+  detectedFormat?: string;
+  loadAddressHex?: string;
+}
+
+export function validateC64Signature(bytes: Uint8Array, fileName: string): ValidationResult {
+  if (!bytes || bytes.length < 2) {
+    return {
+      isValid: false,
+      errorMessage: 'File is empty or corrupted. C64 binaries require at least a 2-byte load address header.'
+    };
+  }
+
+  const ext = fileName.split('.').pop()?.toLowerCase();
+
+  // 1. Rejection of standard non-C64 signatures
+  // Windows/DOS Executable ('MZ' 0x4D 0x5A)
+  if (bytes[0] === 0x4D && bytes[1] === 0x5A) {
+    return {
+      isValid: false,
+      errorMessage: 'Invalid signature: File is an MS-DOS/Windows executable ("MZ"), not a Commodore 64 program.'
+    };
+  }
+
+  // ZIP archive ('PK' 0x50 0x4B)
+  if (bytes[0] === 0x50 && bytes[1] === 0x4B) {
+    return {
+      isValid: false,
+      errorMessage: 'Invalid signature: File is a ZIP archive. Please extract the .PRG or .CRT file first.'
+    };
+  }
+
+  // PNG image (0x89 'P' 'N' 'G')
+  if (bytes.length >= 4 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) {
+    return {
+      isValid: false,
+      errorMessage: 'Invalid signature: File is a PNG image, not a binary C64 program.'
+    };
+  }
+
+  // ASCII HTML / XML / JSON
+  if (bytes[0] === 0x3C || bytes[0] === 0x7B || bytes[0] === 0x5B) {
+    const textPreview = String.fromCharCode(...bytes.slice(0, 10));
+    if (textPreview.toLowerCase().startsWith('<!') || textPreview.toLowerCase().startsWith('<h') || textPreview.startsWith('{')) {
+      return {
+        isValid: false,
+        errorMessage: 'Invalid signature: File is plain text or HTML/JSON, not a binary C64 program.'
+      };
+    }
+  }
+
+  // 2. Check for C64 Cartridge (.CRT)
+  if (ext === 'crt' || (bytes.length >= 16 && String.fromCharCode(...bytes.slice(0, 13)) === 'C64 CARTRIDGE')) {
+    const headerStr = String.fromCharCode(...bytes.slice(0, 16));
+    if (!headerStr.startsWith('C64 CARTRIDGE')) {
+      return {
+        isValid: false,
+        errorMessage: 'Invalid CRT file: Missing "C64 CARTRIDGE   " magic header signature.'
+      };
+    }
+    return { isValid: true, detectedFormat: 'C64 Cartridge (CRT)' };
+  }
+
+  // 3. Check for Commodore Disk Image (.D64)
+  if (ext === 'd64') {
+    if (bytes.length < 16384) {
+      return {
+        isValid: false,
+        errorMessage: `Invalid D64 file: Disk image too small (${bytes.length} bytes). Standard D64 is 174,848 bytes.`
+      };
+    }
+    return { isValid: true, detectedFormat: 'Commodore 1541 Disk (D64)' };
+  }
+
+  // 4. Check for P00/A00 container header ($41 $30 $30 / "A00" or "C64File\0")
+  const hasA00Sig = bytes.length >= 3 && bytes[0] === 0x41 && bytes[1] === 0x30 && bytes[2] === 0x30; // $41 $30 $30
+  const hasP00Sig = bytes.length >= 8 && String.fromCharCode(...bytes.slice(0, 7)) === 'C64File';
+
+  if (hasA00Sig || hasP00Sig) {
+    return {
+      isValid: true,
+      detectedFormat: 'Commodore P00/A00 Archive ($41 $30 $30 Signature)'
+    };
+  }
+
+  // 5. Standard Commodore PRG (2-byte little-endian load address)
+  const loadAddress = bytes[0] | (bytes[1] << 8);
+
+  // Address 0x0000 and 0x0001 are CPU 6510 zero-page direction registers (invalid program entry)
+  if (loadAddress === 0x0000 || loadAddress === 0x0001) {
+    return {
+      isValid: false,
+      errorMessage: `Invalid C64 PRG load address $${loadAddress.toString(16).padStart(4, '0').toUpperCase()} (Addresses $0000-$0001 are reserved 6510 I/O hardware ports).`
+    };
+  }
+
+  // Verify memory boundary: C64 RAM address space is $0002-$FFFF (typically >= $0200)
+  if (loadAddress < 0x0200) {
+    return {
+      isValid: false,
+      errorMessage: `Invalid PRG load address: $${loadAddress.toString(16).padStart(4, '0').toUpperCase()}. Standard Commodore 64 programs load at $0200-$FFFF (e.g. $0801 for BASIC or $1000/$C000 for machine code).`
+    };
+  }
+
+  // Exceeds 64K RAM space
+  if (loadAddress + (bytes.length - 2) > 0x18000) {
+    return {
+      isValid: false,
+      errorMessage: `File exceeds Commodore 64 64KB memory limit (Load: $${loadAddress.toString(16).toUpperCase()}, Size: ${bytes.length} bytes).`
+    };
+  }
+
+  return {
+    isValid: true,
+    detectedFormat: 'Commodore PRG Binary',
+    loadAddressHex: `$${loadAddress.toString(16).padStart(4, '0').toUpperCase()}`
+  };
+}
+
 export function parseC64Binary(fileData: Uint8Array, fileName: string): C64RomData {
   let loadAddress = 0x0801;
   let rawBytes = fileData;
@@ -50,7 +171,18 @@ export function parseC64Binary(fileData: Uint8Array, fileName: string): C64RomDa
 
   const ext = fileName.split('.').pop()?.toLowerCase();
 
-  if (ext === 'crt' && fileData.length >= 64) {
+  // P00 / A00 container ($41 $30 $30 / "C64File\0")
+  if (fileData.length >= 28 && String.fromCharCode(...fileData.slice(0, 7)) === 'C64File') {
+    // 26-byte header: load address is at offset 26..27
+    loadAddress = fileData[26] | (fileData[27] << 8);
+    rawBytes = fileData.slice(26);
+    format = 'PRG';
+  } else if (fileData.length >= 5 && fileData[0] === 0x41 && fileData[1] === 0x30 && fileData[2] === 0x30) {
+    // $41 $30 $30 ("A00") header format
+    loadAddress = fileData[3] | (fileData[4] << 8);
+    rawBytes = fileData.slice(3);
+    format = 'PRG';
+  } else if (ext === 'crt' && fileData.length >= 64) {
     format = 'CRT';
     // Check CRT signature "C64 CARTRIDGE   "
     const headerStr = String.fromCharCode(...fileData.slice(0, 16));
