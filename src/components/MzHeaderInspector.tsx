@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { MzDosHeader } from '../types';
-import { FileCode, Binary, Layers, Info } from 'lucide-react';
+import { Binary, Layers, Info, Cpu, Database, HardDrive, ShieldAlert, ArrowDown } from 'lucide-react';
 
 interface MzHeaderInspectorProps {
   dosHeader: MzDosHeader;
@@ -19,8 +19,20 @@ export const MzHeaderInspector: React.FC<MzHeaderInspectorProps> = ({
   dataOffset,
   videoOffset
 }) => {
-  const [activeTab, setActiveTab] = useState<'fields' | 'hex' | 'memory'>('fields');
+  const [activeTab, setActiveTab] = useState<'memory' | 'fields' | 'hex'>('memory');
   const [hoveredField, setHoveredField] = useState<string | null>(null);
+  const [hoveredSegment, setHoveredSegment] = useState<string | null>(null);
+
+  // Compute memory segment metrics
+  const headerSize = dosHeader.cparhdr * 16; // 64 bytes
+  const codeSize = dataOffset - codeOffset; // 512 bytes
+  const dataSize = totalFileSize - dataOffset; // palette + video + rom payload (~65 KB)
+  const stackSizeBytes = dosHeader.sp; // e.g. 2048 bytes
+  const minAllocBytes = dosHeader.minalloc * 16; // e.g. 64KB
+  const videoBufferSize = 64000; // 320x200 bytes
+
+  // Estimated total conventional memory footprint when loaded in DOS
+  const totalDosFootprint = 256 + totalFileSize + stackSizeBytes + minAllocBytes;
 
   const fields = [
     {
@@ -157,11 +169,21 @@ export const MzHeaderInspector: React.FC<MzHeaderInspectorProps> = ({
       <div className="flex items-center justify-between px-4 py-3 bg-[#131a26] border-b border-slate-800">
         <div className="flex items-center gap-2">
           <Binary className="w-4 h-4 text-amber-400" />
-          <h3 className="font-semibold text-sm text-slate-100">MS-DOS MZ Executable Header Inspector</h3>
+          <h3 className="font-semibold text-sm text-slate-100">MS-DOS MZ Executable Header & Memory Inspector</h3>
         </div>
 
         {/* View Switcher Tabs */}
         <div className="flex items-center gap-1 p-0.5 bg-slate-900/90 rounded-lg border border-slate-800">
+          <button
+            onClick={() => setActiveTab('memory')}
+            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+              activeTab === 'memory'
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            Memory Map
+          </button>
           <button
             onClick={() => setActiveTab('fields')}
             className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
@@ -182,21 +204,317 @@ export const MzHeaderInspector: React.FC<MzHeaderInspectorProps> = ({
           >
             Hex Header Dump
           </button>
-          <button
-            onClick={() => setActiveTab('memory')}
-            className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-              activeTab === 'memory'
-                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            Segment Layout
-          </button>
         </div>
       </div>
 
       {/* Content Panes */}
       <div className="p-4">
+        {/* NEW: Visual Memory Map Section */}
+        {activeTab === 'memory' && (
+          <div className="space-y-5">
+            {/* Visual Footprint Proportion Bar */}
+            <div>
+              <div className="flex items-center justify-between text-xs text-slate-300 mb-2">
+                <span className="font-semibold flex items-center gap-1.5">
+                  <Layers className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Executable Memory Footprint Visualization (MS-DOS Conventional RAM)</span>
+                </span>
+                <span className="font-mono text-amber-300 tabular-nums text-[11px]">
+                  Total Runtime Footprint: {(totalDosFootprint / 1024).toFixed(1)} KB ({totalDosFootprint.toLocaleString()} B)
+                </span>
+              </div>
+
+              {/* Multi-segment visual memory strip */}
+              <div className="h-7 w-full rounded-lg bg-black/60 border border-slate-700/80 overflow-hidden flex shadow-inner">
+                {/* DOS PSP */}
+                <div
+                  onMouseEnter={() => setHoveredSegment('psp')}
+                  onMouseLeave={() => setHoveredSegment(null)}
+                  className="bg-slate-700 hover:brightness-125 transition-all relative group cursor-pointer flex items-center justify-center text-[10px] font-mono text-slate-200 font-bold border-r border-black/40"
+                  style={{ width: '4%' }}
+                  title="DOS PSP: 256 bytes"
+                >
+                  PSP
+                </div>
+
+                {/* MZ Header */}
+                <div
+                  onMouseEnter={() => setHoveredSegment('header')}
+                  onMouseLeave={() => setHoveredSegment(null)}
+                  className="bg-amber-600 hover:brightness-125 transition-all relative group cursor-pointer flex items-center justify-center text-[10px] font-mono text-amber-100 font-bold border-r border-black/40"
+                  style={{ width: '3%' }}
+                  title="MZ Header: 64 bytes"
+                >
+                  MZ
+                </div>
+
+                {/* Code Segment */}
+                <div
+                  onMouseEnter={() => setHoveredSegment('code')}
+                  onMouseLeave={() => setHoveredSegment(null)}
+                  className="bg-cyan-600 hover:brightness-125 transition-all relative group cursor-pointer flex items-center justify-center text-[10px] font-mono text-cyan-100 font-bold border-r border-black/40"
+                  style={{ width: '6%' }}
+                  title="Code Segment (CS): 512 bytes"
+                >
+                  CS
+                </div>
+
+                {/* Data Segment & Video Buffer */}
+                <div
+                  onMouseEnter={() => setHoveredSegment('data')}
+                  onMouseLeave={() => setHoveredSegment(null)}
+                  className="bg-purple-600 hover:brightness-125 transition-all relative group cursor-pointer flex items-center justify-center text-[10px] font-mono text-purple-100 font-bold border-r border-black/40"
+                  style={{ width: '45%' }}
+                  title={`Data Segment (DS) & Video Buffer: ${(dataSize / 1024).toFixed(1)} KB`}
+                >
+                  DATA (DS) & 320x200 VRAM ({((dataSize / totalDosFootprint) * 100).toFixed(0)}%)
+                </div>
+
+                {/* Stack Space */}
+                <div
+                  onMouseEnter={() => setHoveredSegment('stack')}
+                  onMouseLeave={() => setHoveredSegment(null)}
+                  className="bg-rose-600 hover:brightness-125 transition-all relative group cursor-pointer flex items-center justify-center text-[10px] font-mono text-rose-100 font-bold border-r border-black/40"
+                  style={{ width: '12%' }}
+                  title={`Stack Space (SS:SP): ${(stackSizeBytes / 1024).toFixed(1)} KB`}
+                >
+                  STACK (SS)
+                </div>
+
+                {/* Dynamic Free Memory Allocation */}
+                <div
+                  onMouseEnter={() => setHoveredSegment('extra')}
+                  onMouseLeave={() => setHoveredSegment(null)}
+                  className="bg-emerald-800/60 hover:brightness-125 transition-all relative group cursor-pointer flex items-center justify-center text-[10px] font-mono text-emerald-200 border-dashed"
+                  style={{ width: '30%' }}
+                  title={`Min Alloc Reserve (e_minalloc): ${(minAllocBytes / 1024).toFixed(0)} KB`}
+                >
+                  RESERVE (e_minalloc)
+                </div>
+              </div>
+
+              {/* Segment legend chips */}
+              <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-400 mt-2">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded bg-cyan-500 inline-block" />
+                  <span>Code Segment (CS)</span>
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded bg-purple-500 inline-block" />
+                  <span>Data Segment (DS)</span>
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded bg-rose-500 inline-block" />
+                  <span>Stack Space (SS:SP)</span>
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded bg-amber-500 inline-block" />
+                  <span>MZ Header (64B)</span>
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded bg-emerald-600 inline-block" />
+                  <span>Min Extra Heap</span>
+                </span>
+              </div>
+            </div>
+
+            {/* Structured Segment Breakdown Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {/* 1. CODE SEGMENT */}
+              <div
+                className={`p-3.5 rounded-xl border transition-all ${
+                  hoveredSegment === 'code'
+                    ? 'bg-cyan-950/50 border-cyan-400 shadow-lg'
+                    : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <Cpu className="w-4 h-4 text-cyan-400" />
+                    <span className="font-semibold text-xs text-cyan-200">Code Segment (CS)</span>
+                  </div>
+                  <span className="font-mono text-[10px] text-cyan-300 font-bold bg-cyan-950/70 border border-cyan-800/80 px-2 py-0.5 rounded">
+                    CS:0000h
+                  </span>
+                </div>
+
+                <div className="space-y-1.5 font-mono text-xs">
+                  <div className="flex justify-between text-slate-400">
+                    <span>Entry Point (IP):</span>
+                    <span className="text-slate-200 font-bold">0x{dosHeader.ip.toString(16).padStart(4, '0').toUpperCase()}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-400">
+                    <span>File Offset:</span>
+                    <span className="text-slate-200">0x{codeOffset.toString(16).padStart(4, '0').toUpperCase()}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-400">
+                    <span>Segment Size:</span>
+                    <span className="text-cyan-300 font-bold tabular-nums">{codeSize} bytes</span>
+                  </div>
+                  <div className="flex justify-between text-slate-400">
+                    <span>Target Arch:</span>
+                    <span className="text-slate-300">8086 Real Mode</span>
+                  </div>
+                </div>
+
+                <div className="mt-3 pt-2.5 border-t border-slate-800/80 text-[11px] text-slate-400 leading-snug">
+                  Contains VGA Mode 13h switch (<span className="font-mono text-cyan-300">INT 10h, AX=0013h</span>), Gameport poller (<span className="font-mono text-cyan-300">Port 0201h</span>), VRetrace sync (<span className="font-mono text-cyan-300">Port 03DAh</span>), and palette cycle engine.
+                </div>
+              </div>
+
+              {/* 2. DATA SEGMENT */}
+              <div
+                className={`p-3.5 rounded-xl border transition-all ${
+                  hoveredSegment === 'data'
+                    ? 'bg-purple-950/50 border-purple-400 shadow-lg'
+                    : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <Database className="w-4 h-4 text-purple-400" />
+                    <span className="font-semibold text-xs text-purple-200">Data Segment (DS)</span>
+                  </div>
+                  <span className="font-mono text-[10px] text-purple-300 font-bold bg-purple-950/70 border border-purple-800/80 px-2 py-0.5 rounded">
+                    DS:0200h
+                  </span>
+                </div>
+
+                <div className="space-y-1.5 font-mono text-xs">
+                  <div className="flex justify-between text-slate-400">
+                    <span>File Offset:</span>
+                    <span className="text-slate-200">0x{dataOffset.toString(16).padStart(4, '0').toUpperCase()}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-400">
+                    <span>Palette DAC Block:</span>
+                    <span className="text-slate-200 font-bold tabular-nums">768 bytes (256x3)</span>
+                  </div>
+                  <div className="flex justify-between text-slate-400">
+                    <span>320x200 VRAM Target:</span>
+                    <span className="text-emerald-300 font-bold">ES:A000h</span>
+                  </div>
+                  <div className="flex justify-between text-slate-400">
+                    <span>Total Data Size:</span>
+                    <span className="text-purple-300 font-bold tabular-nums">{(dataSize / 1024).toFixed(1)} KB</span>
+                  </div>
+                </div>
+
+                <div className="mt-3 pt-2.5 border-t border-slate-800/80 text-[11px] text-slate-400 leading-snug">
+                  Encodes 18-bit DAC palette cycle registers (<span className="font-mono text-purple-300">03C8h/03C9h</span>), linear Mode 13h buffer, and embedded C64 program bytecode.
+                </div>
+              </div>
+
+              {/* 3. STACK SPACE */}
+              <div
+                className={`p-3.5 rounded-xl border transition-all ${
+                  hoveredSegment === 'stack'
+                    ? 'bg-rose-950/50 border-rose-400 shadow-lg'
+                    : 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
+                }`}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <HardDrive className="w-4 h-4 text-rose-400" />
+                    <span className="font-semibold text-xs text-rose-200">Stack Space (SS:SP)</span>
+                  </div>
+                  <span className="font-mono text-[10px] text-rose-300 font-bold bg-rose-950/70 border border-rose-800/80 px-2 py-0.5 rounded">
+                    SS:0x{dosHeader.ss.toString(16).toUpperCase()}
+                  </span>
+                </div>
+
+                <div className="space-y-1.5 font-mono text-xs">
+                  <div className="flex justify-between text-slate-400">
+                    <span>Initial SP (Top):</span>
+                    <span className="text-rose-300 font-bold">0x{dosHeader.sp.toString(16).padStart(4, '0').toUpperCase()}</span>
+                  </div>
+                  <div className="flex justify-between text-slate-400">
+                    <span>Stack Capacity:</span>
+                    <span className="text-slate-200 tabular-nums">{stackSizeBytes} bytes ({stackSizeBytes / 2} words)</span>
+                  </div>
+                  <div className="flex justify-between text-slate-400">
+                    <span>Min Allocation:</span>
+                    <span className="text-slate-200 font-bold tabular-nums">{(minAllocBytes / 1024).toFixed(0)} KB (e_minalloc)</span>
+                  </div>
+                  <div className="flex justify-between text-slate-400">
+                    <span>Growth Direction:</span>
+                    <span className="text-rose-400 flex items-center gap-1 font-bold">
+                      <ArrowDown className="w-3 h-3" /> Downward
+                    </span>
+                  </div>
+                </div>
+
+                <div className="mt-3 pt-2.5 border-t border-slate-800/80 text-[11px] text-slate-400 leading-snug">
+                  Allocates initial real-mode call stack for BIOS interrupt dispatching (<span className="font-mono text-rose-300">INT 10h/16h/21h</span>) and hardware raster timing routines.
+                </div>
+              </div>
+            </div>
+
+            {/* Memory Address Space Layout Table */}
+            <div className="p-3 bg-black/50 rounded-xl border border-slate-800 overflow-x-auto">
+              <div className="text-xs font-semibold text-slate-300 mb-2.5 flex items-center justify-between">
+                <span>MS-DOS Real-Mode Segment Address Table</span>
+                <span className="text-[11px] text-slate-500 font-mono">Paragraph alignment (16-byte boundaries)</span>
+              </div>
+              <table className="w-full text-left font-mono text-xs text-slate-300">
+                <thead>
+                  <tr className="border-b border-slate-800 text-[11px] text-slate-500 uppercase">
+                    <th className="pb-2 font-medium">Memory Region</th>
+                    <th className="pb-2 font-medium">Segment Register</th>
+                    <th className="pb-2 font-medium">Base Address</th>
+                    <th className="pb-2 font-medium text-right">Size</th>
+                    <th className="pb-2 font-medium text-right">Permissions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 text-[11px]">
+                  <tr className="hover:bg-slate-800/40">
+                    <td className="py-2 text-slate-400 font-sans">Program Segment Prefix (PSP)</td>
+                    <td className="py-2 text-slate-500">DS / ES (Initial)</td>
+                    <td className="py-2 text-slate-400">PSP:0000h</td>
+                    <td className="py-2 text-right text-slate-400 tabular-nums">256 B</td>
+                    <td className="py-2 text-right text-amber-400/80">Read / Write</td>
+                  </tr>
+                  <tr className="hover:bg-slate-800/40">
+                    <td className="py-2 text-amber-300 font-sans font-medium">MS-DOS MZ Header</td>
+                    <td className="py-2 text-amber-400">FILE:0000h</td>
+                    <td className="py-2 text-slate-400">CS:0000h (File)</td>
+                    <td className="py-2 text-right text-amber-300 font-bold tabular-nums">{headerSize} B</td>
+                    <td className="py-2 text-right text-slate-400">Read Only</td>
+                  </tr>
+                  <tr className="hover:bg-slate-800/40">
+                    <td className="py-2 text-cyan-300 font-sans font-medium">Executable Machine Code</td>
+                    <td className="py-2 text-cyan-400 font-bold">CS (Code Segment)</td>
+                    <td className="py-2 text-cyan-300">CS:0000h</td>
+                    <td className="py-2 text-right text-cyan-300 font-bold tabular-nums">{codeSize} B</td>
+                    <td className="py-2 text-right text-cyan-400">Execute / Read</td>
+                  </tr>
+                  <tr className="hover:bg-slate-800/40">
+                    <td className="py-2 text-purple-300 font-sans font-medium">Palette DAC & Program Data</td>
+                    <td className="py-2 text-purple-400 font-bold">DS (Data Segment)</td>
+                    <td className="py-2 text-purple-300">DS:0200h</td>
+                    <td className="py-2 text-right text-purple-300 font-bold tabular-nums">{(dataSize / 1024).toFixed(1)} KB</td>
+                    <td className="py-2 text-right text-purple-400">Read / Write</td>
+                  </tr>
+                  <tr className="hover:bg-slate-800/40">
+                    <td className="py-2 text-emerald-300 font-sans font-medium">VGA Mode 13h Framebuffer</td>
+                    <td className="py-2 text-emerald-400 font-bold">ES:A000h (VRAM)</td>
+                    <td className="py-2 text-emerald-300">A000:0000h</td>
+                    <td className="py-2 text-right text-emerald-300 font-bold tabular-nums">64.0 KB</td>
+                    <td className="py-2 text-right text-emerald-400">Video I/O Chunky</td>
+                  </tr>
+                  <tr className="hover:bg-slate-800/40">
+                    <td className="py-2 text-rose-300 font-sans font-medium">Application Stack Space</td>
+                    <td className="py-2 text-rose-400 font-bold">SS:SP (Stack)</td>
+                    <td className="py-2 text-rose-300">SS:0000h - {dosHeader.sp.toString(16).toUpperCase()}h</td>
+                    <td className="py-2 text-right text-rose-300 font-bold tabular-nums">{(stackSizeBytes / 1024).toFixed(1)} KB</td>
+                    <td className="py-2 text-right text-rose-400">Push / Pop LIFO</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Structure Fields Tab */}
         {activeTab === 'fields' && (
           <div className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
@@ -236,6 +554,7 @@ export const MzHeaderInspector: React.FC<MzHeaderInspectorProps> = ({
           </div>
         )}
 
+        {/* Hex Dump Tab */}
         {activeTab === 'hex' && (
           <div className="space-y-3">
             <p className="text-xs text-slate-400">
@@ -260,69 +579,6 @@ export const MzHeaderInspector: React.FC<MzHeaderInspectorProps> = ({
               <div className="flex items-center gap-1.5">
                 <span className="w-3 h-3 rounded bg-purple-500/30 border border-purple-500 inline-block" />
                 <span>0x0020: Relocation Table</span>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'memory' && (
-          <div className="space-y-3 text-xs">
-            <p className="text-slate-400">
-              Executable binary memory map layout when loaded into conventional DOS memory by <span className="font-mono text-slate-200">INT 21h, AH=4Bh (EXEC)</span>:
-            </p>
-
-            <div className="space-y-1.5 font-mono text-[11px]">
-              {/* DOS PSP */}
-              <div className="p-2.5 rounded bg-slate-900/60 border border-slate-800 flex items-center justify-between">
-                <div>
-                  <span className="text-slate-500 mr-3">PSP:0000</span>
-                  <span className="text-slate-400">DOS Program Segment Prefix</span>
-                </div>
-                <span className="text-slate-500">256 bytes (0x100)</span>
-              </div>
-
-              {/* MZ Header */}
-              <div className="p-2.5 rounded bg-amber-950/30 border border-amber-800/50 flex items-center justify-between">
-                <div>
-                  <span className="text-amber-400 mr-3">FILE:0000</span>
-                  <span className="text-amber-200 font-semibold">MS-DOS MZ Header (4 Paragraphs)</span>
-                </div>
-                <span className="text-amber-300 font-bold">64 bytes (0x0040)</span>
-              </div>
-
-              {/* Code Segment */}
-              <div className="p-2.5 rounded bg-cyan-950/30 border border-cyan-800/50 flex items-center justify-between">
-                <div>
-                  <span className="text-cyan-400 mr-3">CS:0000</span>
-                  <span className="text-cyan-200 font-semibold">Real-Mode 16-Bit Entry Code (VGA Mode 13h / Gameport loop)</span>
-                </div>
-                <span className="text-cyan-300">Offset +0x{codeOffset.toString(16).toUpperCase()}</span>
-              </div>
-
-              {/* Data / Palette Block */}
-              <div className="p-2.5 rounded bg-purple-950/30 border border-purple-800/50 flex items-center justify-between">
-                <div>
-                  <span className="text-purple-400 mr-3">DS:0200h</span>
-                  <span className="text-purple-200 font-semibold">VGA DAC 256-Color Palette & Cycle Table</span>
-                </div>
-                <span className="text-purple-300">Offset +0x{dataOffset.toString(16).toUpperCase()}</span>
-              </div>
-
-              {/* Video Screen Buffer */}
-              <div className="p-2.5 rounded bg-emerald-950/30 border border-emerald-800/50 flex items-center justify-between">
-                <div>
-                  <span className="text-emerald-400 mr-3">ES:A000h</span>
-                  <span className="text-emerald-200 font-semibold">320x200 Linear 8-Bit Chunky Screen Buffer</span>
-                </div>
-                <span className="text-emerald-300 font-bold">64,000 bytes (0xFA00)</span>
-              </div>
-
-              {/* Total size */}
-              <div className="p-2.5 rounded bg-slate-900 border border-slate-700 flex items-center justify-between font-bold text-slate-200">
-                <span>TOTAL GENERATED EXECUTABLE SIZE</span>
-                <span className="text-amber-400 tabular-nums">
-                  {(totalFileSize / 1024).toFixed(2)} KB ({totalFileSize.toLocaleString()} bytes)
-                </span>
               </div>
             </div>
           </div>
