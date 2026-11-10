@@ -57,7 +57,10 @@ export interface C64RomData {
   basicProgram: boolean;
   vicBorderColor: number;
   vicBgColor: number;
+  crc32: string;
   title: string;
+  developer?: string;
+  releaseYear?: number;
   description: string;
   rasterCycleDetected: boolean;
   detectedCycleType?: PaletteCycleConfig['type'];

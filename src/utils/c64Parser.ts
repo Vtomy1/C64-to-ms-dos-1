@@ -42,17 +42,43 @@ const OPCODES_6502: Record<number, { mnemonic: string; bytes: number; mode: stri
   0xF0: { mnemonic: 'BEQ', bytes: 2, mode: 'relative' }
 };
 
+// CRC32 standard lookup table (IEEE 802.3 standard)
+const CRC32_TABLE: Uint32Array = (() => {
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let k = 0; k < 8; k++) {
+      c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    }
+    table[i] = c >>> 0;
+  }
+  return table;
+})();
+
+export function calculateCRC32(bytes: Uint8Array): string {
+  let crc = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) {
+    crc = (crc >>> 8) ^ CRC32_TABLE[(crc ^ bytes[i]) & 0xFF];
+  }
+  const result = ((crc ^ 0xFFFFFFFF) >>> 0).toString(16).toUpperCase().padStart(8, '0');
+  return result;
+}
+
 export interface ValidationResult {
   isValid: boolean;
   errorMessage?: string;
   detectedFormat?: string;
   loadAddressHex?: string;
+  crc32: string;
 }
 
 export function validateC64Signature(bytes: Uint8Array, fileName: string): ValidationResult {
+  const crc32 = calculateCRC32(bytes);
+
   if (!bytes || bytes.length < 2) {
     return {
       isValid: false,
+      crc32,
       errorMessage: 'File is empty or corrupted. C64 binaries require at least a 2-byte load address header.'
     };
   }
@@ -64,6 +90,7 @@ export function validateC64Signature(bytes: Uint8Array, fileName: string): Valid
   if (bytes[0] === 0x4D && bytes[1] === 0x5A) {
     return {
       isValid: false,
+      crc32,
       errorMessage: 'Invalid signature: File is an MS-DOS/Windows executable ("MZ"), not a Commodore 64 program.'
     };
   }
@@ -72,6 +99,7 @@ export function validateC64Signature(bytes: Uint8Array, fileName: string): Valid
   if (bytes[0] === 0x50 && bytes[1] === 0x4B) {
     return {
       isValid: false,
+      crc32,
       errorMessage: 'Invalid signature: File is a ZIP archive. Please extract the .PRG or .CRT file first.'
     };
   }
@@ -80,6 +108,7 @@ export function validateC64Signature(bytes: Uint8Array, fileName: string): Valid
   if (bytes.length >= 4 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) {
     return {
       isValid: false,
+      crc32,
       errorMessage: 'Invalid signature: File is a PNG image, not a binary C64 program.'
     };
   }
@@ -90,6 +119,7 @@ export function validateC64Signature(bytes: Uint8Array, fileName: string): Valid
     if (textPreview.toLowerCase().startsWith('<!') || textPreview.toLowerCase().startsWith('<h') || textPreview.startsWith('{')) {
       return {
         isValid: false,
+        crc32,
         errorMessage: 'Invalid signature: File is plain text or HTML/JSON, not a binary C64 program.'
       };
     }
@@ -101,10 +131,11 @@ export function validateC64Signature(bytes: Uint8Array, fileName: string): Valid
     if (!headerStr.startsWith('C64 CARTRIDGE')) {
       return {
         isValid: false,
+        crc32,
         errorMessage: 'Invalid CRT file: Missing "C64 CARTRIDGE   " magic header signature.'
       };
     }
-    return { isValid: true, detectedFormat: 'C64 Cartridge (CRT)' };
+    return { isValid: true, crc32, detectedFormat: 'C64 Cartridge (CRT)' };
   }
 
   // 3. Check for Commodore Disk Image (.D64)
@@ -112,10 +143,11 @@ export function validateC64Signature(bytes: Uint8Array, fileName: string): Valid
     if (bytes.length < 16384) {
       return {
         isValid: false,
+        crc32,
         errorMessage: `Invalid D64 file: Disk image too small (${bytes.length} bytes). Standard D64 is 174,848 bytes.`
       };
     }
-    return { isValid: true, detectedFormat: 'Commodore 1541 Disk (D64)' };
+    return { isValid: true, crc32, detectedFormat: 'Commodore 1541 Disk (D64)' };
   }
 
   // 4. Check for P00/A00 container header ($41 $30 $30 / "A00" or "C64File\0")
@@ -125,6 +157,7 @@ export function validateC64Signature(bytes: Uint8Array, fileName: string): Valid
   if (hasA00Sig || hasP00Sig) {
     return {
       isValid: true,
+      crc32,
       detectedFormat: 'Commodore P00/A00 Archive ($41 $30 $30 Signature)'
     };
   }
@@ -136,6 +169,7 @@ export function validateC64Signature(bytes: Uint8Array, fileName: string): Valid
   if (loadAddress === 0x0000 || loadAddress === 0x0001) {
     return {
       isValid: false,
+      crc32,
       errorMessage: `Invalid C64 PRG load address $${loadAddress.toString(16).padStart(4, '0').toUpperCase()} (Addresses $0000-$0001 are reserved 6510 I/O hardware ports).`
     };
   }
@@ -144,6 +178,7 @@ export function validateC64Signature(bytes: Uint8Array, fileName: string): Valid
   if (loadAddress < 0x0200) {
     return {
       isValid: false,
+      crc32,
       errorMessage: `Invalid PRG load address: $${loadAddress.toString(16).padStart(4, '0').toUpperCase()}. Standard Commodore 64 programs load at $0200-$FFFF (e.g. $0801 for BASIC or $1000/$C000 for machine code).`
     };
   }
@@ -152,12 +187,14 @@ export function validateC64Signature(bytes: Uint8Array, fileName: string): Valid
   if (loadAddress + (bytes.length - 2) > 0x18000) {
     return {
       isValid: false,
+      crc32,
       errorMessage: `File exceeds Commodore 64 64KB memory limit (Load: $${loadAddress.toString(16).toUpperCase()}, Size: ${bytes.length} bytes).`
     };
   }
 
   return {
     isValid: true,
+    crc32,
     detectedFormat: 'Commodore PRG Binary',
     loadAddressHex: `$${loadAddress.toString(16).padStart(4, '0').toUpperCase()}`
   };
@@ -287,7 +324,10 @@ export function parseC64Binary(fileData: Uint8Array, fileName: string): C64RomDa
     basicProgram: isBasic,
     vicBorderColor: vicBorder,
     vicBgColor: vicBg,
+    crc32: calculateCRC32(fileData),
     title,
+    developer: 'Unknown / Community',
+    releaseYear: 1986,
     description: `Loaded ${format} binary (${(fileData.length / 1024).toFixed(1)} KB) targeting memory address $${loadAddress.toString(16).toUpperCase().padStart(4, '0')}.`,
     rasterCycleDetected: rasterDetected,
     detectedCycleType: cycleType

@@ -14,7 +14,10 @@ import {
   RefreshCw,
   FolderOpen,
   AlertTriangle,
-  X
+  X,
+  ShieldCheck,
+  Check,
+  Copy
 } from 'lucide-react';
 import { C64RomData, PaletteCycleConfig, JoystickConfig, ConversionOptions } from './types';
 import { SAMPLE_ROMS } from './utils/c64Samples';
@@ -26,13 +29,31 @@ import { PaletteCycleStudio } from './components/PaletteCycleStudio';
 import { JoystickConfigurator } from './components/JoystickConfigurator';
 import { CodeInspector } from './components/CodeInspector';
 import { ExportModal } from './components/ExportModal';
+import { MetadataManager } from './components/MetadataManager';
 
 export default function App() {
   // Active ROM
   const [selectedRom, setSelectedRom] = useState<C64RomData>(SAMPLE_ROMS[0]);
 
+  // Handler for metadata edits from MetadataManager
+  const handleUpdateMetadata = (updated: { title: string; developer: string; releaseYear: number }) => {
+    setSelectedRom((prev) => ({
+      ...prev,
+      title: updated.title,
+      developer: updated.developer,
+      releaseYear: updated.releaseYear
+    }));
+  };
+
   // UI Error Toast state for invalid file uploads or signatures
   const [toastError, setToastError] = useState<string | null>(null);
+  const [crcCopied, setCrcCopied] = useState<boolean>(false);
+
+  const handleCopyCrc = (crc: string) => {
+    navigator.clipboard.writeText(crc);
+    setCrcCopied(true);
+    setTimeout(() => setCrcCopied(false), 2000);
+  };
 
   // Auto-dismiss toast error after 6 seconds
   useEffect(() => {
@@ -42,7 +63,7 @@ export default function App() {
   }, [toastError]);
 
   // Active navigation tab
-  const [activeTab, setActiveTab] = useState<'monitor' | 'mz_header' | 'palette' | 'joystick' | 'code'>('monitor');
+  const [activeTab, setActiveTab] = useState<'monitor' | 'mz_header' | 'metadata' | 'palette' | 'joystick' | 'code'>('monitor');
 
   // Display aspect ratio (4:3 CRT standard vs 1:1 square)
   const [aspectRatio, setAspectRatio] = useState<'4:3' | '1:1'>('4:3');
@@ -119,12 +140,13 @@ export default function App() {
       if (buffer) {
         const bytes = new Uint8Array(buffer);
 
-        // Verification check of C64 file signature
+        // Verification check of C64 file signature & CRC32 calculation
         const validation = validateC64Signature(bytes, file.name);
         if (!validation.isValid) {
+          const crcNote = validation.crc32 ? ` [CRC32: 0x${validation.crc32}]` : '';
           setToastError(
-            validation.errorMessage ||
-            `Invalid C64 file signature in "${file.name}". Expected valid PRG load address header (e.g., $0801, $1000, $C000) or Commodore container header ($41 $30 $30).`
+            (validation.errorMessage ||
+            `Invalid C64 file signature in "${file.name}". Expected valid PRG load address header (e.g., $0801, $1000, $C000) or Commodore container header ($41 $30 $30).`) + crcNote
           );
           if (fileInputRef.current) {
             fileInputRef.current.value = '';
@@ -203,6 +225,16 @@ export default function App() {
             MZ Header
           </button>
           <button
+            onClick={() => setActiveTab('metadata')}
+            className={`px-3 py-1.5 rounded-md transition-colors ${
+              activeTab === 'metadata'
+                ? 'bg-amber-500/20 text-amber-300 font-semibold'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            Metadata
+          </button>
+          <button
             onClick={() => setActiveTab('palette')}
             className={`px-3 py-1.5 rounded-md transition-colors ${
               activeTab === 'palette'
@@ -270,7 +302,7 @@ export default function App() {
               <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
                 Active Commodore 64 Source Program
               </h2>
-              <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 mt-0.5">
                 <span className="font-mono text-amber-300 font-semibold">{selectedRom.fileName}</span>
                 <span aria-hidden="true">·</span>
                 <span className="font-mono text-slate-300">${selectedRom.loadAddress.toString(16).toUpperCase()}</span>
@@ -278,6 +310,42 @@ export default function App() {
                 <span className="tabular-nums">{(selectedRom.fileSize / 1024).toFixed(1)} KB</span>
                 <span aria-hidden="true">·</span>
                 <span>{selectedRom.format} Format</span>
+                <span aria-hidden="true">·</span>
+                <span className="text-slate-300 font-medium">{selectedRom.title}</span>
+                {selectedRom.developer && (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span className="text-slate-400">By {selectedRom.developer}</span>
+                  </>
+                )}
+                {selectedRom.releaseYear && (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span className="text-emerald-400 font-mono">({selectedRom.releaseYear})</span>
+                  </>
+                )}
+                <span aria-hidden="true">·</span>
+                <button
+                  onClick={() => handleCopyCrc(selectedRom.crc32)}
+                  title="Click to copy CRC32 fingerprint"
+                  className="inline-flex items-center gap-1 font-mono text-[11px] text-cyan-300 bg-cyan-950/40 hover:bg-cyan-900/50 border border-cyan-800/60 px-2 py-0.5 rounded transition-colors group cursor-pointer"
+                >
+                  <ShieldCheck className="w-3 h-3 text-cyan-400 shrink-0" />
+                  <span>CRC32:</span>
+                  <span className="font-bold text-cyan-200">{selectedRom.crc32}</span>
+                  {crcCopied ? (
+                    <Check className="w-2.5 h-2.5 text-emerald-400 ml-0.5" />
+                  ) : (
+                    <Copy className="w-2.5 h-2.5 text-slate-500 group-hover:text-cyan-300 ml-0.5" />
+                  )}
+                </button>
+                <span aria-hidden="true">·</span>
+                <button
+                  onClick={() => setActiveTab('metadata')}
+                  className="text-[11px] text-amber-400/90 hover:text-amber-300 underline cursor-pointer"
+                >
+                  Edit Header Metadata
+                </button>
               </div>
             </div>
 
@@ -321,6 +389,13 @@ export default function App() {
             />
 
             {/* Secondary Pane based on active navigation tab for desktop */}
+            {activeTab === 'metadata' && (
+              <MetadataManager
+                romData={selectedRom}
+                onUpdateMetadata={handleUpdateMetadata}
+              />
+            )}
+
             {activeTab === 'mz_header' && (
               <MzHeaderInspector
                 dosHeader={exeResult.dosHeader}
@@ -342,6 +417,13 @@ export default function App() {
 
           {/* Right Column: Palette & Joystick Configurations */}
           <div className="lg:col-span-5 space-y-6">
+            {activeTab !== 'metadata' && (
+              <MetadataManager
+                romData={selectedRom}
+                onUpdateMetadata={handleUpdateMetadata}
+              />
+            )}
+
             <PaletteCycleStudio
               paletteCycle={paletteCycle}
               onUpdatePaletteCycle={setPaletteCycle}
@@ -352,7 +434,7 @@ export default function App() {
               onUpdateJoystick={setJoystick}
             />
 
-            {activeTab !== 'mz_header' && activeTab !== 'code' && (
+            {activeTab !== 'mz_header' && activeTab !== 'code' && activeTab !== 'metadata' && (
               <MzHeaderInspector
                 dosHeader={exeResult.dosHeader}
                 headerHex={exeResult.headerHex}

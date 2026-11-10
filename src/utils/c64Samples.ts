@@ -1,4 +1,5 @@
 import { C64RomData } from '../types';
+import { calculateCRC32 } from './c64Parser';
 
 // Generator for a realistic C64 PRG binary file with load address header [addrLow, addrHigh]
 function buildSamplePrg(loadAddr: number, payload: number[]): Uint8Array {
@@ -88,63 +89,80 @@ for (let i = 0; i < 200; i++) {
   basicPayload.push(0xEA); // NOP
 }
 
+const plasmaBytes = buildSamplePrg(0x1000, plasmaPayload);
+const spaceBytes = buildSamplePrg(0x0801, spacePayload);
+const horizonBytes = buildSamplePrg(0xC000, horizonPayload);
+const basicBytes = buildSamplePrg(0x0801, basicPayload);
+
 export const SAMPLE_ROMS: C64RomData[] = [
   {
     fileName: 'CYBER_RASTER_PLASMA.PRG',
-    fileSize: plasmaPayload.length + 2,
+    fileSize: plasmaBytes.length,
     format: 'PRG',
     loadAddress: 0x1000,
     entryPoint: 0x1000,
-    rawBytes: buildSamplePrg(0x1000, plasmaPayload),
+    rawBytes: plasmaBytes,
     basicProgram: false,
     vicBorderColor: 0,
     vicBgColor: 6,
+    crc32: calculateCRC32(plasmaBytes),
     title: 'Cyber Raster Plasma Demoscene',
+    developer: 'Future Crew / 64 Elite',
+    releaseYear: 1987,
     description: 'Iconic 16-phase VIC-II copper rainbow bars and smooth sinusoidal palette cycling with raster interrupt synchronization.',
     rasterCycleDetected: true,
     detectedCycleType: 'copper_rainbow'
   },
   {
     fileName: 'SPACE_MARAUDER_64.PRG',
-    fileSize: spacePayload.length + 2,
+    fileSize: spaceBytes.length,
     format: 'PRG',
     loadAddress: 0x0801,
     entryPoint: 0x0801,
-    rawBytes: buildSamplePrg(0x0801, spacePayload),
+    rawBytes: spaceBytes,
     basicProgram: true,
     vicBorderColor: 0,
     vicBgColor: 0,
+    crc32: calculateCRC32(spaceBytes),
     title: 'Space Marauder 64 (Arcade Shooter)',
+    developer: 'Binary Systems UK',
+    releaseYear: 1985,
     description: 'Fast vertical-scrolling arcade space combat. Uses hardware sprites, dynamic starfield, and full CIA #1 Port 2 joystick controls.',
     rasterCycleDetected: true,
     detectedCycleType: 'plasma_wave'
   },
   {
     fileName: 'NEON_COPPER_HORIZON.PRG',
-    fileSize: horizonPayload.length + 2,
+    fileSize: horizonBytes.length,
     format: 'PRG',
     loadAddress: 0xC000,
     entryPoint: 0xC000,
-    rawBytes: buildSamplePrg(0xC000, horizonPayload),
+    rawBytes: horizonBytes,
     basicProgram: false,
     vicBorderColor: 0,
     vicBgColor: 6,
+    crc32: calculateCRC32(horizonBytes),
     title: 'Neon Copper Horizon Landscape',
+    developer: 'Outrun Digital Arts',
+    releaseYear: 1988,
     description: 'Synthesizer sunset landscape featuring smooth horizontal raster gradient bars, shimmering water cycle, and analog joystick camera navigation.',
     rasterCycleDetected: true,
     detectedCycleType: 'water_shimmer'
   },
   {
     fileName: 'COMMODORE_BASIC_V2.PRG',
-    fileSize: basicPayload.length + 2,
+    fileSize: basicBytes.length,
     format: 'PRG',
     loadAddress: 0x0801,
     entryPoint: 0x0801,
-    rawBytes: buildSamplePrg(0x0801, basicPayload),
+    rawBytes: basicBytes,
     basicProgram: true,
     vicBorderColor: 14, // Light Blue
     vicBgColor: 6,      // Blue
+    crc32: calculateCRC32(basicBytes),
     title: 'Commodore 64 BASIC V2 Shell',
+    developer: 'Commodore Business Machines',
+    releaseYear: 1982,
     description: 'Classic boot environment with 64K RAM System 38911 bytes free, blinking cursor, PETSCII glyph generator, and joystick diagnostic port.',
     rasterCycleDetected: true,
     detectedCycleType: 'raster_bars'

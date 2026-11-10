@@ -185,6 +185,16 @@ export function buildMsDosExe(
   view.setUint16(0x20, 0x0008, true);
   view.setUint16(0x22, 0x0000, true);
 
+  // Embed C64 ROM Metadata Descriptor into MZ Header reserved area (Offset 0x24 - 0x3F, 28 bytes)
+  // Format: "C64:" + Title(12) + "/" + Dev(8) + "/" + Year(4)
+  const metaTitle = (romData.title || 'UNTITLED').slice(0, 14);
+  const metaDev = (romData.developer || 'UNKNOWN').slice(0, 10);
+  const metaYear = (romData.releaseYear || 1986).toString();
+  const metaSignature = `C64:${metaTitle} (${metaYear}) [${metaDev}]`;
+  for (let m = 0; m < Math.min(28, metaSignature.length); m++) {
+    headerBuf[0x24 + m] = metaSignature.charCodeAt(m) & 0xFF;
+  }
+
   // 7. Assemble Complete Binary Output
   const exeBytes = new Uint8Array(totalFileSize);
   let cur = 0;
@@ -248,10 +258,18 @@ export function buildMsDosExe(
 }
 
 function generateNasmSource(romData: C64RomData, options: ConversionOptions): string {
+  const metaTitle = romData.title || 'Untitled';
+  const metaDev = romData.developer || 'Unknown';
+  const metaYear = romData.releaseYear || 1986;
+
   return `; ==============================================================================
 ; C64 to MS-DOS MZ Executable (8-bit 320x200 VGA Mode 13h)
+; Title:      ${metaTitle}
+; Developer:  ${metaDev}
+; Year:       ${metaYear}
 ; Target CPU: 8086 / 80286 / 80386 Real Mode DOS
 ; Input ROM:  ${romData.fileName} (Load: $${romData.loadAddress.toString(16).toUpperCase()})
+; ROM CRC32:  0x${romData.crc32 || '00000000'} (IEEE 802.3 Checksum)
 ; Video:      VGA 320x200 256-Color (Segment 0A000h)
 ; Palette:    Commodore 64 16-Color DAC Table with Palette Cycle Engine
 ; Gameport:   IBM PC Gameport Port 0201h mapped to C64 CIA #1 Port 2 ($DC00)

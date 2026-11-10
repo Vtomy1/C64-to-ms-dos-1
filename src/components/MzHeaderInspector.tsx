@@ -160,6 +160,15 @@ export const MzHeaderInspector: React.FC<MzHeaderInspectorProps> = ({
       offset: '0x001A',
       size: '2 bytes',
       desc: 'Identifies overlay index. 0 represents the resident main executable program.'
+    },
+    {
+      name: 'e_res (C64 Descriptor)',
+      label: 'C64 ROM Header Metadata',
+      value: 'Offset 0x24 - 0x3F',
+      decoded: 'Injected Title, Developer & Year ASCII string',
+      offset: '0x0024',
+      size: '28 bytes',
+      desc: 'Reserved MZ header paragraphs preceding code segment; contains ASCII descriptor string formatted by Metadata Manager.'
     }
   ];
 
